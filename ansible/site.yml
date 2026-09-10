@@ -1,0 +1,23 @@
+---
+# Entry point for the Packer `ansible` provisioner.
+#
+#   packer build .            -> runs the PowerShell path (active by default)
+#   uncomment the ansible     -> runs this instead; the PowerShell scripts stay
+#   provisioner in build.pkr.hcl  in the repo as the side-by-side reference
+#
+# Order matters and mirrors the numbered PowerShell scripts 1:1.
+
+- name: Windows Server 2022 golden image baseline
+  ansible.builtin.import_playbook: 01-install-updates.yml
+
+- name: Windows Server 2022 golden image baseline
+  ansible.builtin.import_playbook: 02-install-agents.yml
+
+- name: Windows Server 2022 golden image baseline
+  ansible.builtin.import_playbook: 03-domain-join-prep.yml
+
+- name: Windows Server 2022 golden image baseline
+  ansible.builtin.import_playbook: 04-cis-hardening.yml
+
+# NOTE: 05-validate-baseline.yml runs AFTER Packer's windows-restart, so it is
+# invoked by a second ansible provisioner rather than imported here.

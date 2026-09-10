@@ -1,0 +1,59 @@
+---
+# Mirrors packer/scripts/03-domain-join-prep.ps1
+#
+# The image is PREPARED for the domain and never joined to it. Note the
+# absence of ansible.windows.win_domain_membership - that is the point. A
+# sysprepped image that was domain-joined at build time carries one machine
+# account that every clone then fights over.
+
+- name: Prepare the image for domain join without joining it
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Pre-seed the DNS suffix search list
+      ansible.windows.win_dns_client:
+        adapter_names: '*'
+        suffix_search_list:
+          - "{{ ad_domain }}"
+
+    - name: Import the enterprise root CA certificate
+      ansible.windows.win_certificate_store:
+        path: 'C:\Windows\Temp\corp-root-ca.cer'
+        store_location: LocalMachine
+        store_name: Root
+        state: present
+
+    - name: Import the issuing CA certificate
+      ansible.windows.win_certificate_store:
+        path: 'C:\Windows\Temp\corp-issuing-ca.cer'
+        store_location: LocalMachine
+        store_name: CertificateAuthority
+        state: present
+
+    - name: Point the time service at the domain hierarchy
+      ansible.windows.win_command: w32tm.exe /config /syncfromflags:domhier /update
+      changed_when: true
+
+    # Terraform hands the per-VM djoin blob in through user_data (AWS) or
+    # customData (Azure); this task registers the job that consumes it.
+    - name: Register the first-boot offline domain join task
+      community.windows.win_scheduled_task:
+        name: OfflineDomainJoin
+        description: Consumes the per-VM djoin blob supplied at first boot
+        actions:
+          - path: djoin.exe
+            arguments: >-
+              /requestODJ /loadfile C:\odj.txt
+              /windowspath C:\Windows /localos
+        triggers:
+          - type: boot
+        username: SYSTEM
+        run_level: highest
+        state: present
+
+    - name: Confirm the image is leaving the build domain-agnostic
+      ansible.builtin.debug:
+        msg: >-
+          Prepared for {{ ad_domain }} but not joined.
+          Image stays reusable across every OU.

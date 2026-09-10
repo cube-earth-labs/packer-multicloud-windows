@@ -1,0 +1,21 @@
+<powershell>
+# Runs as EC2 user_data before Packer connects. This is REAL work, not a stub:
+# an AWS Windows instance has no WinRM listener that Packer can use until this
+# runs. The azure-arm builder does the equivalent for you automatically.
+
+$ErrorActionPreference = "Stop"
+
+# Self-signed cert + HTTPS listener on 5986
+$cert = New-SelfSignedCertificate -DnsName $env:COMPUTERNAME -CertStoreLocation "Cert:\LocalMachine\My"
+$id   = (Get-Item -Path "Cert:\LocalMachine\My\$($cert.Thumbprint)").Thumbprint
+
+winrm create winrm/config/Listener?Address=*+Transport=HTTPS "@{Hostname=`"$env:COMPUTERNAME`"; CertificateThumbprint=`"$id`"}"
+winrm set winrm/config/service/auth '@{Basic="true"}'
+winrm set winrm/config/service '@{AllowUnencrypted="false"}'
+winrm set winrm/config/winrs '@{MaxMemoryPerShellMB="1024"}'
+
+netsh advfirewall firewall add rule name="WinRM-HTTPS" dir=in action=allow protocol=TCP localport=5986
+
+# Packer authenticates as Administrator with the key-decrypted password
+net user Administrator /active:yes
+</powershell>

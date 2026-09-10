@@ -1,0 +1,67 @@
+---
+# Mirrors packer/scripts/05-validate-baseline.ps1
+#
+# Runs AFTER Packer's windows-restart provisioner, which is the whole point:
+# it proves the baseline survived a reboot. A failed assert fails the build, so
+# a non-compliant image never reaches the HCP Packer registry.
+
+- name: Verify the baseline persisted across reboot
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    # There is no win_optional_feature_info module - DISM features have to be
+    # queried through PowerShell.
+    - name: Collect SMBv1 feature state
+      ansible.windows.win_powershell:
+        script: |
+          $f = Get-WindowsOptionalFeature -Online -FeatureName SMB1Protocol
+          $Ansible.Result = @{ state = $f.State.ToString() }
+          $Ansible.Changed = $false
+      register: smb1
+
+    - name: Assert SMBv1 is gone
+      ansible.builtin.assert:
+        that: smb1.result.state != 'Enabled'
+        fail_msg: SMBv1 is still enabled - baseline did not survive reboot
+
+    - name: Collect TLS 1.0 server state
+      ansible.windows.win_reg_stat:
+        path: >-
+          HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.0\Server
+        name: Enabled
+      register: tls10
+
+    - name: Assert TLS 1.0 is disabled
+      ansible.builtin.assert:
+        that: tls10.value == 0
+        fail_msg: TLS 1.0 is still enabled
+
+    - name: Collect agent service state
+      ansible.windows.win_service_info:
+        name: "{{ agent_service_names[item] }}"
+      register: agent_services
+      loop: "{{ agents }}"
+
+    - name: Assert every agent is present and set to delayed auto start
+      ansible.builtin.assert:
+        that:
+          - item.exists
+          - item.services[0].start_mode == 'auto'
+        fail_msg: "Agent service missing or misconfigured: {{ item.name | default('unknown') }}"
+      loop: "{{ agent_services.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # The image must NOT be domain-joined. This assert is the guard against
+    # someone "helpfully" adding win_domain_membership to 03.
+    - name: Assert the image is not joined to the domain
+      ansible.builtin.assert:
+        that: not ansible_facts['windows_domain_member']
+        fail_msg: >-
+          Image is domain-joined. Every VM cloned from it will share one
+          machine account. Remove the join from 03-domain-join-prep.yml.
+
+    - name: Baseline verified
+      ansible.builtin.debug:
+        msg: "{{ cis_profile }} verified post-reboot. Safe to generalize."

@@ -1,0 +1,30 @@
+---
+# Mirrors packer/scripts/01-install-updates.ps1
+#
+# Unlike the PowerShell version (which is an echo stub), these tasks are real.
+# The Ansible path is commented out in build.pkr.hcl, so nothing here executes
+# during the demo - it exists to show the shape of the real thing.
+
+- name: Patch the base image
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: Install security, critical, and rollup updates
+      ansible.windows.win_updates:
+        category_names:
+          - SecurityUpdates
+          - CriticalUpdates
+          - UpdateRollups
+        # Packer owns reboots via the windows-restart provisioner. Letting
+        # Ansible reboot here races the WinRM session Packer is holding.
+        reboot: false
+        log_path: C:\Windows\Temp\ansible-win-updates.log
+      register: update_result
+
+    - name: Report patch level baked into the image
+      ansible.builtin.debug:
+        msg: >-
+          Installed {{ update_result.installed_update_count }} update(s).
+          Reboot required: {{ update_result.reboot_required }}.
+          Post-provision patching window: eliminated.

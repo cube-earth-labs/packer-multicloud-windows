@@ -1,0 +1,10 @@
+---
+# Collections the Windows baseline depends on.
+#   ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: ansible.windows
+    version: ">=2.5.0"
+  - name: community.windows
+    version: ">=2.3.0"
+  - name: chocolatey.chocolatey
+    version: ">=1.5.1"

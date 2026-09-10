@@ -1,0 +1,36 @@
+---
+# Mirrors packer/scripts/02-install-agents.ps1
+
+- name: Bake monitoring and security agents into the image
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Stage vendor installers from the internal artifact share
+      ansible.windows.win_copy:
+        src: "{{ agent_source_share }}\\{{ item }}\\setup.msi"
+        dest: 'C:\Windows\Temp\agents\{{ item }}\setup.msi'
+        remote_src: true
+      loop: "{{ agents }}"
+
+    - name: Install each agent silently
+      ansible.windows.win_package:
+        path: 'C:\Windows\Temp\agents\{{ item }}\setup.msi'
+        state: present
+        arguments: /quiet /norestart
+      loop: "{{ agents }}"
+
+    # Installed but deliberately NOT started and NOT registered. Registration
+    # is per-VM; if it happens at build time every VM cloned from this image
+    # reports to the vendor console as the same host.
+    - name: Set agent services to delayed automatic start, left stopped
+      ansible.windows.win_service:
+        name: "{{ agent_service_names[item] }}"
+        start_mode: delayed
+        state: stopped
+      loop: "{{ agents }}"
+
+    - name: Remove staged installers so they do not ship inside the image
+      ansible.windows.win_file:
+        path: C:\Windows\Temp\agents
+        state: absent

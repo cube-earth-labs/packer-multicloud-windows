@@ -1,0 +1,119 @@
+name: Build Windows Golden Image
+
+# Both clouds build from one workflow. `only` lets you demo a single cloud
+# without editing the template.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Which sources to build"
+        type: choice
+        default: all
+        options:
+          - all
+          - aws-only
+          - azure-only
+      image_version:
+        description: "Semantic version for the Azure Shared Image Gallery"
+        type: string
+        default: "0.0.1"
+  schedule:
+    # Weekly rebuild. A golden image that is not rebuilt is a stale image.
+    - cron: "0 6 * * 1"
+
+env:
+  PKR_VAR_image_version: ${{ inputs.image_version || '0.0.1' }}
+  HCP_CLIENT_ID: ${{ secrets.HCP_CLIENT_ID }}
+  HCP_CLIENT_SECRET: ${{ secrets.HCP_CLIENT_SECRET }}
+  HCP_PROJECT_ID: ${{ secrets.HCP_PROJECT_ID }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-packer@main
+        with:
+          version: latest
+
+      - name: packer init
+        run: packer init ./packer
+
+      - name: packer fmt -check
+        run: packer fmt -check -diff ./packer
+
+      - name: packer validate
+        run: packer validate ./packer
+
+  build:
+    needs: validate
+    runs-on: ubuntu-latest
+
+    # OIDC into both clouds - no long-lived cloud keys in the repo.
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-packer@main
+        with:
+          version: latest
+
+      - name: Configure AWS credentials (OIDC)
+        if: inputs.target != 'azure-only'
+        run: echo "would run aws-actions/configure-aws-credentials@v4 (OIDC assume-role)"
+
+      - name: Configure Azure credentials (OIDC)
+        if: inputs.target != 'aws-only'
+        run: echo "would run azure/login@v2 (federated credential)"
+
+      - name: packer init
+        run: packer init ./packer
+
+      - name: Resolve --only filter
+        id: only
+        run: |
+          case "${{ inputs.target }}" in
+            aws-only)   echo "flag=-only=windows-golden-image.amazon-ebs.windows" >> "$GITHUB_OUTPUT" ;;
+            azure-only) echo "flag=-only=windows-golden-image.azure-arm.windows"  >> "$GITHUB_OUTPUT" ;;
+            *)          echo "flag=" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: packer build
+        run: |
+          echo "would run: packer build ${{ steps.only.outputs.flag }} ./packer"
+          echo ""
+          echo "Both sources run in PARALLEL. Expect interleaved output:"
+          echo "  ==> windows-golden-image.amazon-ebs.windows: Launching instance..."
+          echo "  ==> windows-golden-image.azure-arm.windows:  Creating resource group..."
+          echo ""
+          echo "One HCP Packer version is created containing both artifacts."
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: packer-manifest
+          path: packer/manifest.json
+          if-no-files-found: ignore
+
+  promote:
+    needs: build
+    runs-on: ubuntu-latest
+
+    # Human gate. Promotion is the deploy - everything downstream reads the
+    # channel, so this is the only approval that matters.
+    environment: image-promotion
+
+    steps:
+      - name: Promote version to the production channel
+        run: |
+          echo "would run: hcp packer channels update production \\"
+          echo "             --bucket-name windows-server-2022-golden \\"
+          echo "             --version-fingerprint <fingerprint from manifest>"
+          echo ""
+          echo "Every Terraform workspace consuming the 'production' channel now"
+          echo "plans a new image ID on its next run. No VM is configured in place."

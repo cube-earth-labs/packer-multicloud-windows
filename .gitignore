@@ -1,0 +1,21 @@
+# Packer
+manifest.json
+packer_cache/
+*.auto.pkrvars.local.hcl
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.auto.pkrvars.hcl
+crash.log
+
+# Ansible
+*.retry
+collections/
+
+# Local secrets
+.env
+*.pem

@@ -1,0 +1,24 @@
+---
+# Shared inputs. Packer passes ad_domain / cis_profile in via --extra-vars so
+# the playbooks and the PowerShell scripts read the same values.
+
+ad_domain: corp.example.com
+cis_profile: CIS-Windows-Server-2022-L1
+
+# Agents baked at build time instead of installed post-provision.
+agents:
+  - crowdstrike
+  - splunk-uf
+  - dynatrace-oneagent
+  - ssm-agent
+
+# Windows service name for each agent, used to set start mode without starting
+# the service (see 02-install-agents.yml for why they must stay stopped).
+agent_service_names:
+  crowdstrike: CSFalconService
+  splunk-uf: SplunkForwarder
+  dynatrace-oneagent: OneAgent
+  ssm-agent: AmazonSSMAgent
+
+# Internal share holding vendor installers. Replace with your real path.
+agent_source_share: '\\artifacts.corp.example.com\packer\agents'
